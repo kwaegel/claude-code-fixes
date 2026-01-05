@@ -1,0 +1,169 @@
+# Claude Code WSL2 Sandbox Patch - Version 2 (Surgical)
+
+## Overview
+
+This is a surgical patch for Claude Code binary `2.0.76` that bypasses the WSL2
+detection which prevents sandboxing from being enabled. Unlike the blanket v1 patch,
+this version uses context-aware replacement to minimize collateral changes.
+
+## What Was Patched
+
+The binary `2.0.76-patched` has been modified to bypass WSL2 platform detection
+by neutering the specific checks in the platform detection function.
+
+### Surgical Changes (6 total):
+
+**Location 1: Main Platform Detection (offset 0x6326090)**
+- `H.toLowerCase().includes("microsoft")` → `H.toLowerCase().includes("micr0s0ft")`
+- `H.toLowerCase().includes("wsl")` → `H.toLowerCase().includes("ws1")`
+
+**Location 2: Duplicate Code Section (offset 0x6785070)**
+- `includes("microsoft")` → `includes("micr0s0ft")`
+
+**Location 3: Bundled Code Section (offset 0xbe07464)**
+- `includes("microsoft")` → `includes("micr0s0ft")`
+- `includes("wsl")` → `includes("ws1")`
+
+**Location 4: Additional Reference (offset 0xc266444)**
+- `includes("microsoft")` → `includes("micr0s0ft")`
+
+### Detection Logic (original):
+
+```javascript
+vL = BA(() => {
+  try {
+    try {
+      let H = zH().readFileSync("/proc/version", {encoding: "utf8"});
+      if (H.toLowerCase().includes("microsoft") ||
+          H.toLowerCase().includes("wsl"))
+        return "wsl"
+    } catch(H) {
+      s(H instanceof Error ? H : Error(String(H)))
+    }
+    return "linux"
+  } catch(H) {
+    return s(H instanceof Error ? H : Error(String(H))), "unknown"
+  }
+})
+```
+
+After patching, the checks look for "micr0s0ft" and "ws1" instead, causing the
+detection to fail and return "linux" instead of "wsl".
+
+## Verification
+
+```bash
+# Original binary
+$ strings 2.0.76 | grep -i "microsoft" | wc -l
+172
+
+# V1 blanket patch (many unintended changes)
+$ strings 2.0.76-patched | grep -i "microsoft" | wc -l
+52
+
+# V2 surgical patch (only intended changes)
+$ strings 2.0.76-patched | grep -i "microsoft" | wc -l
+172  # (all unrelated strings preserved)
+
+$ strings 2.0.76-patched | grep -i "micr0s0ft" | wc -l
+4    # (only WSL detection modified)
+```
+
+## Files
+
+- **2.0.76** - Original binary (215MB, unmodified)
+- **2.0.76-patched** - patched binary
+- **patch_2.0.76.py** - Python script to apply the patch
+
+## Usage
+
+### Option 1: Direct symlink
+```bash
+ln -sf $(pwd)/2.0.76-patched claude-code
+./claude-code
+```
+
+### Option 2: Update existing symlink
+```bash
+rm /path/to/your-existing-symlink
+ln -s $(pwd)/2.0.76-patched /path/to/your-existing-symlink
+```
+
+### Option 3: Replace in-place (if you're sure)
+```bash
+cp 2.0.76-patched /path/to/claude-code/binary
+```
+
+## How The Surgical Patch Works
+
+The Python script (`surgical_patch.py`) performs context-aware patching:
+
+1. Searches for `readFileSync("/proc/version"` markers in the binary
+2. Within a 500-byte window after each marker, looks for:
+   - `.includes("microsoft")` → replaces with `.includes("micr0s0ft")`
+   - `.includes("wsl")` → replaces with `.includes("ws1")`
+3. Leaves all other occurrences untouched
+
+This ensures only the platform detection logic is modified, preserving all other
+functionality (SSL, MIME types, certificate validation, npm packages, etc.).
+
+## Reproducing The Patch
+
+To patch a different version or re-apply:
+
+```bash
+python3 surgical_patch.py
+# Input: 2.0.76
+# Output: 2.0.76-patched
+# Changes: 6 targeted modifications
+```
+
+The script can be modified to patch other versions by changing the input filename.
+
+## Why This Patch Exists
+
+From upstream issue #10567:
+- Claude Code explicitly detects WSL2 and disables sandboxing
+- The sandboxing primitives (bwrap, bubblewrap, socat) work fine on WSL2
+- The check is overly conservative and blocks legitimate WSL2 usage
+- This patch is a workaround until Anthropic removes the check upstream
+
+## Notes
+
+- **Recommended version**: Use `2.0.76-patched` (surgical patch)
+- **Backup**: Keep original `2.0.76` as backup
+- **Updates**: This patch will need to be reapplied after updates
+- **Proper solution**: Anthropic should remove the WSL2 check upstream
+- **Testing**: After applying, verify sandbox works without the error:
+  ```
+  Error: Sandboxing is currently only supported on macOS and Linux
+  ```
+
+## Technical Details
+
+- **Binary format**: ELF 64-bit executable (Node.js packaged app)
+- **Packaging**: Likely using `pkg` or similar Node.js bundler
+- **String encoding**: UTF-8
+- **Patch method**: In-place binary modification (non-destructive to file structure)
+- **Byte alignment**: Preserved (same string lengths)
+
+## Caveats
+
+- This is an unofficial workaround, not an official fix
+- May stop working if upstream changes the detection logic significantly
+- No warranty or guarantees - use at your own risk
+- Report the issue to Anthropic to get an official fix
+
+## Related Files
+
+- PATCH_NOTES.md - Documentation for V1 blanket patch
+- surgical_patch.py - Automated patching script
+- 2.0.76 - Original binary
+- 2.0.76-patched - Surgical patch (this version)
+
+---
+
+Generated: 2024-12-23
+Version: 2.0.76-patched
+Changes: 6 targeted modifications
+Risk Level: Minimal
